@@ -1,7 +1,2 @@
 os
 os_version
-cpu_type
-cpu_cores
-memory_size
-cpu_usage
-memory_usage

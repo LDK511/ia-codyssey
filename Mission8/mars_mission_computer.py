@@ -5,11 +5,64 @@ import json
 import threading
 import platform  # 운영체제, CPU 정보 가져오는 표준 라이브러리
 import psutil    # CPU/메모리 실시간 사용량 가져오는 라이브러리
+import tkinter as tk  # 보너스: GUI 체크박스로 setting.txt 항목 설정
+import os  # setting.txt 파일 존재 여부 확인
+
+
+# 보너스: 전체 항목 목록 정의
+ALL_KEYS = [
+    'os',
+    'os_version',
+    'cpu_type',
+    'cpu_cores',
+    'memory_size',
+    'cpu_usage',
+    'memory_usage'
+]
+
+
+def create_default_settings():
+    # 보너스: setting.txt가 없으면 전체 항목을 기본값으로 자동 생성
+    with open('setting.txt', 'w', encoding='utf-8') as f:
+        for key in ALL_KEYS:
+            f.write(key + '\n')
+
+
+def open_settings_gui():
+    # 보너스: tkinter GUI로 체크박스 형태로 항목 선택 후 setting.txt에 저장
+    current_keys = []
+    try:
+        with open('setting.txt', 'r', encoding='utf-8') as f:
+            current_keys = [line.strip() for line in f if line.strip()]
+    except FileNotFoundError:
+        create_default_settings()
+        current_keys = ALL_KEYS[:]
+
+    root = tk.Tk()
+    root.title('설정 - 출력 항목 선택')
+
+    tk.Label(root, text='출력할 항목을 선택하세요', font=('Arial', 12)).pack(pady=10)
+
+    vars = {}
+    for key in ALL_KEYS:
+        var = tk.BooleanVar(value=(key in current_keys))
+        tk.Checkbutton(root, text=key, variable=var).pack(anchor='w', padx=20)
+        vars[key] = var
+
+    def save_and_close():
+        selected = [key for key, var in vars.items() if var.get()]
+        with open('setting.txt', 'w', encoding='utf-8') as f:
+            for key in selected:
+                f.write(key + '\n')
+        root.destroy()
+
+    tk.Button(root, text='저장', command=save_and_close).pack(pady=10)
+    root.mainloop()
 
 
 class DummySensor:
     def __init__(self):
-        self.env_values = { # 요구사항 : env_values 사전 객체 멤버 추가, 초기값은 각 항목 범위의 중간값으로 설정
+        self.env_values = {  # 요구사항: env_values 사전 객체 멤버 추가, 초기값은 각 항목 범위의 중간값으로 설정
             'mars_base_internal_temperature': 24,
             'mars_base_external_temperature': 10,
             'mars_base_internal_humidity': 55,
@@ -146,13 +199,13 @@ class MissionComputer:
 
     def load_settings(self):
         # 보너스: setting.txt 파일에서 출력할 항목 목록 읽기
-        # setting.txt가 없으면 None 반환해서 전체 항목 출력
+        # setting.txt가 없으면 자동 생성 후 전체 항목 반환
+        if not os.path.exists('setting.txt'):
+            create_default_settings()
         try:
             with open('setting.txt', 'r', encoding='utf-8') as f:
                 keys = [line.strip() for line in f if line.strip()]
-            return keys
-        except FileNotFoundError:
-            return None
+            return keys if keys else None
         except Exception as e:
             print('Error: setting.txt 읽기 오류: ' + str(e))
             return None
@@ -164,6 +217,9 @@ def wait_for_stop(computer):
 
 
 if __name__ == '__main__':
+    # 보너스: 실행 전 GUI로 출력 항목 설정
+    open_settings_gui()
+
     ds = DummySensor()
     runComputer = MissionComputer()  # 요구사항: 문제7 RunComputer에서 runComputer로 변경
 
