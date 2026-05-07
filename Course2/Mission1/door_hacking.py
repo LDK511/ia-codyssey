@@ -39,6 +39,29 @@ def save_password(password, output_path):
         raise
 
 
+def load_cached_password(output_path):
+    '''이전 실행에서 저장된 비밀번호를 읽는다.
+
+    파일이 없거나, 형식(길이 6, 숫자/소문자 알파벳)이 맞지 않으면 None 반환.
+    이 함수는 비밀번호의 정당성까지 보증하지 않으며, 실제 검증은
+    호출자가 try_password로 수행해야 한다.
+    '''
+    try:
+        with open(output_path, 'r', encoding='utf-8') as file:
+            content = file.read().strip()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        print(f'캐시 파일 읽기 오류: {error}')
+        return None
+
+    if len(content) != PASSWORD_LENGTH:
+        return None
+    if not all(c in CHARSET for c in content):
+        return None
+    return content
+
+
 def try_password(zip_file, member_name, password):
     password_bytes = password.encode('utf-8')
     try:
@@ -49,14 +72,18 @@ def try_password(zip_file, member_name, password):
 
 
 def unlock_zip(zip_path=ZIP_FILE_NAME, output_path=OUTPUT_FILE_NAME):
+    '''zip 파일의 6자리 비밀번호를 찾아 password.txt에 저장한다.
+
+    이전 실행 결과(output_path)가 존재하면 zip에 적용해 먼저 검증한다.
+    검증을 통과하면 전수 탐색을 생략한다(캐시 적중).
+    그렇지 않으면 0-9, a-z 6자리 전체 공간을 사전식 순서로 탐색한다.
+    '''
     start_time = time.time()
     start_text = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))
     repeat_count = 0
 
     print(f'암호 해제 시작 시간: {start_text}')
     print(f'대상 파일: {zip_path}')
-    print('탐색 문자: 숫자 0-9, 소문자 a-z')
-    print('탐색 길이: 6자리', flush=True)
 
     if not os.path.exists(zip_path):
         print('zip 파일을 찾을 수 없습니다.')
@@ -65,6 +92,24 @@ def unlock_zip(zip_path=ZIP_FILE_NAME, output_path=OUTPUT_FILE_NAME):
     try:
         with zipfile.ZipFile(zip_path) as zip_file:
             member_name = get_first_file_name(zip_file)
+
+            # 1. 캐시(이전 실행 결과) 검증
+            cached = load_cached_password(output_path)
+            if cached is not None:
+                repeat_count += 1
+                if try_password(zip_file, member_name, cached):
+                    elapsed_time = get_elapsed_time(start_time)
+                    print('저장된 비밀번호 검증 성공 (전수 탐색 생략)')
+                    print(f'비밀번호: {cached}')
+                    print(f'반복 회수: {repeat_count}')
+                    print(f'진행 시간: {elapsed_time}초')
+                    print(f'저장 파일: {output_path}')
+                    return cached
+                print('저장된 비밀번호가 유효하지 않습니다. 전수 탐색을 시작합니다.')
+
+            # 2. 전수 탐색 (cache miss 또는 cache invalid)
+            print('탐색 문자: 숫자 0-9, 소문자 a-z')
+            print('탐색 길이: 6자리', flush=True)
 
             for candidate in itertools.product(CHARSET, repeat=PASSWORD_LENGTH):
                 password = ''.join(candidate)
@@ -127,6 +172,10 @@ def check_prefix(prefix):
 
 
 def unlock_zip_fast(zip_path=ZIP_FILE_NAME, output_path=OUTPUT_FILE_NAME):
+    '''보너스: 멀티프로세싱으로 키 공간을 prefix 단위로 나눠 병렬 탐색.
+
+    캐시가 있으면 unlock_zip과 동일하게 먼저 검증한다.
+    '''
     start_time = time.time()
     start_text = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))
     repeat_count = 0
@@ -137,8 +186,6 @@ def unlock_zip_fast(zip_path=ZIP_FILE_NAME, output_path=OUTPUT_FILE_NAME):
     print(f'빠른 암호 해제 시작 시간: {start_text}')
     print(f'대상 파일: {zip_path}')
     print(f'사용 프로세스 수: {worker_count}')
-    print('탐색 문자: 숫자 0-9, 소문자 a-z')
-    print('탐색 길이: 6자리', flush=True)
 
     if not os.path.exists(zip_path):
         print('zip 파일을 찾을 수 없습니다.')
@@ -147,6 +194,22 @@ def unlock_zip_fast(zip_path=ZIP_FILE_NAME, output_path=OUTPUT_FILE_NAME):
     try:
         with zipfile.ZipFile(zip_path) as zip_file:
             member_name = get_first_file_name(zip_file)
+
+            cached = load_cached_password(output_path)
+            if cached is not None:
+                repeat_count += 1
+                if try_password(zip_file, member_name, cached):
+                    elapsed_time = get_elapsed_time(start_time)
+                    print('저장된 비밀번호 검증 성공 (전수 탐색 생략)')
+                    print(f'비밀번호: {cached}')
+                    print(f'반복 회수: {repeat_count}')
+                    print(f'진행 시간: {elapsed_time}초')
+                    print(f'저장 파일: {output_path}')
+                    return cached
+                print('저장된 비밀번호가 유효하지 않습니다. 병렬 탐색을 시작합니다.')
+
+        print('탐색 문자: 숫자 0-9, 소문자 a-z')
+        print('탐색 길이: 6자리', flush=True)
 
         prefixes = (
             ''.join(prefix)
