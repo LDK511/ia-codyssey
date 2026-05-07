@@ -1,10 +1,8 @@
 import itertools
-import sys
-sys.stdout.reconfigure(line_buffering=True)
 import os
+import sys
 import time
 import zipfile
-import zlib
 from multiprocessing import Pool, cpu_count
 
 
@@ -14,7 +12,9 @@ ZIP_FILE_NAME = 'emergency_storage_key.zip'
 OUTPUT_FILE_NAME = 'password.txt'
 PROGRESS_INTERVAL = 100000
 
-_worker_zip_path = None
+sys.stdout.reconfigure(line_buffering=True)
+
+_worker_zip_file = None
 _worker_member_name = None
 
 
@@ -25,10 +25,8 @@ def get_elapsed_time(start_time):
 
 def get_first_file_name(zip_file):
     file_names = zip_file.namelist()
-
     if not file_names:
         raise ValueError('zip 파일 안에 확인할 파일이 없습니다.')
-
     return file_names[0]
 
 
@@ -43,11 +41,10 @@ def save_password(password, output_path):
 
 def try_password(zip_file, member_name, password):
     password_bytes = password.encode('utf-8')
-
     try:
         zip_file.read(member_name, pwd=password_bytes)
         return True
-    except Exception:
+    except (RuntimeError, zipfile.BadZipFile):
         return False
 
 
@@ -108,29 +105,23 @@ def unlock_zip(zip_path=ZIP_FILE_NAME, output_path=OUTPUT_FILE_NAME):
 
 
 def init_worker(zip_path, member_name):
-    global _worker_zip_path
+    global _worker_zip_file
     global _worker_member_name
 
-    _worker_zip_path = zip_path
+    _worker_zip_file = zipfile.ZipFile(zip_path)
     _worker_member_name = member_name
 
 
 def check_prefix(prefix):
+    suffix_length = PASSWORD_LENGTH - len(prefix)
     repeat_count = 0
 
-    try:
-        with zipfile.ZipFile(_worker_zip_path) as zip_file:
-            suffix_length = PASSWORD_LENGTH - len(prefix)
+    for suffix in itertools.product(CHARSET, repeat=suffix_length):
+        password = prefix + ''.join(suffix)
+        repeat_count += 1
 
-            for suffix in itertools.product(CHARSET, repeat=suffix_length):
-                password = prefix + ''.join(suffix)
-                repeat_count += 1
-
-                if try_password(zip_file, _worker_member_name, password):
-                    return password, repeat_count
-
-    except (OSError, zipfile.BadZipFile):
-        return None, repeat_count
+        if try_password(_worker_zip_file, _worker_member_name, password):
+            return password, repeat_count
 
     return None, repeat_count
 
@@ -139,11 +130,15 @@ def unlock_zip_fast(zip_path=ZIP_FILE_NAME, output_path=OUTPUT_FILE_NAME):
     start_time = time.time()
     start_text = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))
     repeat_count = 0
+    last_logged = 0
     prefix_length = 3
     worker_count = max(cpu_count() - 1, 1)
 
     print(f'빠른 암호 해제 시작 시간: {start_text}')
+    print(f'대상 파일: {zip_path}')
     print(f'사용 프로세스 수: {worker_count}')
+    print('탐색 문자: 숫자 0-9, 소문자 a-z')
+    print('탐색 길이: 6자리', flush=True)
 
     if not os.path.exists(zip_path):
         print('zip 파일을 찾을 수 없습니다.')
@@ -166,12 +161,13 @@ def unlock_zip_fast(zip_path=ZIP_FILE_NAME, output_path=OUTPUT_FILE_NAME):
             for password, count in pool.imap_unordered(check_prefix, prefixes):
                 repeat_count += count
 
-                if repeat_count % PROGRESS_INTERVAL < count:
+                if repeat_count - last_logged >= PROGRESS_INTERVAL:
                     elapsed_time = get_elapsed_time(start_time)
                     print(
                         f'진행 중 | 반복 회수: {repeat_count} | '
                         f'진행 시간: {elapsed_time}초'
                     )
+                    last_logged = repeat_count
 
                 if password is not None:
                     elapsed_time = get_elapsed_time(start_time)
