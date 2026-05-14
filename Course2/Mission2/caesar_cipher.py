@@ -264,6 +264,7 @@ def save_result(shift, text):
             f.write(f'결과 텍스트: {text}\n')
         return True
     except IOError as e:
+        print(f'파일 저장 오류: {e}')
         return False
 
 
