@@ -1,0 +1,7 @@
+# 비밀번호 등 실제 접속 정보 (커밋 금지)
+config.py
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
